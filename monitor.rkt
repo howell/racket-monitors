@@ -1,5 +1,6 @@
 #lang racket
 
+(require data/queue)
 (require (for-syntax syntax/parse))
 
 (module+ test
@@ -35,8 +36,8 @@
     ;; How many synchronized methods does the owner need to return from before
     ;; relinquishing the monitor
     (define stack-depth 0)
-    ;; (Listof (Cons Semaphore Thread))
-    (define waiters '())
+    ;; (Queueof Semaphore)
+    (define waiters make-queue)
 
     (define/public (enter-synchronized-method)
       (define current (current-thread))
@@ -68,26 +69,25 @@
     (define (notify)
       (unless (equal? the-owner (current-thread))
         (error 'notify "notify called by non-owner"))
-      (unless (empty? waiters)
-        (match-define (cons sema waiter) (first waiters))
-        (set! waiters (rest waiters))
+      (unless (queue-empty? waiters)
+        (define sema (dequeue! waiters))
         (semaphore-post sema)))
 
     ;; wake up all
     (define (notify-all)
       (unless (equal? the-owner (current-thread))
         (error 'notify "notify called by non-owner"))
-      (define ws waiters)
-      (set! waiters empty)
-      (for ([pr (in-list ws)])
-        (semaphore-post (car pr))))
+      (let loop ()
+        (unless (queue-empty? waiters)
+          (semaphore-post (dequeue! waiters))
+          (loop))))
 
     (define (wait)
       (define current (current-thread))
       (unless (equal? the-owner current)
         (error 'wait "wait called by non-owner"))
       (define sema (make-semaphore))
-      (set! waiters (append waiters (list (cons sema current))))
+      (enqueue! waiters sema)
       (semaphore-post the-lock)
       (semaphore-wait sema))))
 
