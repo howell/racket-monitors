@@ -1,10 +1,17 @@
 #lang racket
 
+(provide monitor-mixin
+         define/synchronized
+         define/synchronized/override)
+
 (require data/queue)
 (require (for-syntax syntax/parse))
 
 (module+ test
   (require rackunit))
+
+(define-member-name enter-synchronized-method (generate-member-key))
+(define-member-name exit-synchronized-method (generate-member-key))
 
 (define monitor-mixin
   (mixin () ()
