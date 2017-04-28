@@ -24,19 +24,27 @@
     ;; relinquishing the monitor
     (define stack-depth 0)
     ;; (Queueof Semaphore)
-    (define waiters make-queue)
+    ;; Would an alternative design with more sharing (possibly just a single
+    ;; semaphore) be better?
+    (define waiters (make-queue))
 
-    (define/public (enter-synchronized-method)
+    (define (acquire!)
       (define current (current-thread))
       (cond
+        ;; we are already in the monitor, no need to lock
         [(equal? the-owner current)
-         ;; we are already in the monitor, no need to lock
-         (set! stack-depth (add1 stack-depth))]
+         #f]
         [else
-         ;; someone else may be in the montior, obtain the lock
          (semaphore-wait the-lock)
-         (set! the-owner current)
-         (set! stack-depth 1)]))
+         (set! the-owner current)]))
+
+    (define (release!)
+      (set! the-owner #f)
+      (semaphore-post the-lock))
+
+    (define/public (enter-synchronized-method)
+      (acquire!)
+      (set! stack-depth (add1 stack-depth)))
 
     ;; need to keep track of depth, I believe
     (define/public (exit-synchronized-method)
@@ -46,14 +54,10 @@
                "exit-synchronized-method called by non-owner"))
       (set! stack-depth (sub1 stack-depth))
       (when (zero? stack-depth)
-        (exit-monitor)))
-
-    (define (exit-monitor)
-      (set! the-owner #f)
-      (semaphore-post the-lock))
+        (release!)))
 
     ;; wake up the first
-    (define (notify)
+    (define/public (notify)
       (unless (equal? the-owner (current-thread))
         (error 'notify "notify called by non-owner"))
       (unless (queue-empty? waiters)
@@ -61,7 +65,7 @@
         (semaphore-post sema)))
 
     ;; wake up all
-    (define (notify-all)
+    (define/public (notify-all)
       (unless (equal? the-owner (current-thread))
         (error 'notify "notify called by non-owner"))
       (let loop ()
@@ -69,14 +73,19 @@
           (semaphore-post (dequeue! waiters))
           (loop))))
 
-    (define (wait)
+    (define/public (wait)
       (define current (current-thread))
       (unless (equal? the-owner current)
         (error 'wait "wait called by non-owner"))
       (define sema (make-semaphore))
+      ;; hold my beer
       (enqueue! waiters sema)
-      (semaphore-post the-lock)
-      (semaphore-wait sema))))
+      (define my-stack-depth stack-depth)
+      (set! stack-depth 0)
+      (release!)
+      (semaphore-wait sema)
+      (acquire!)
+      (set! stack-depth my-stack-depth))))
 
 ;; how many of these are needed? What should the general form be?
 
@@ -86,7 +95,7 @@
      #'(define/public (method-name formals ...)
          (send this enter-synchronized-method)
          (define result
-           (begin body ...))
+           (let () body ...))
          (send this exit-synchronized-method)
          result)]))
 
@@ -96,7 +105,7 @@
      #'(define/override (method-name formals ...)
          (send this enter-synchronized-method)
          (define result
-           (begin body ...))
+           (let () body ...))
          (send this exit-synchronized-method)
          result)]))
 
@@ -112,10 +121,16 @@
         (set! count (add1 val)))))
 
   (define synchronized-counter%
-    (class (monitor-mixin counter%)
+    (class (monitor-mixin object%)
       (super-new)
-      (define/synchronized/override (incr!)
-        (super incr!))))
+      (field [count 0])
+      ;; for the purpose of exercising nesting in synchronized methods
+      (define/synchronized (calculate v)
+        (add1 v))
+      (define/synchronized (incr!)
+        (define val count)
+        (sleep 0)
+        (set! count (calculate val)))))
 
   (define (test cntr threads incrs)
     (define handles
@@ -136,3 +151,110 @@
   (test c2 THREADS INCRS)
   (check-equal? (* THREADS INCRS)
                 (get-field count c2)))
+
+(module+ test
+  ;; dining philosophers test case
+  (define dining-table%
+    (class (monitor-mixin object%)
+      (super-new)
+      ;; Positive Integer
+      (init places)
+      ;; The number of philosophers holding the fork; should always be 0 or 1
+      (define forks (make-vector places 0))
+
+      (define (take-fork! i)
+        (check-invariants!)
+        (vector-set! forks i (add1 (vector-ref forks i)))
+        (check-invariants!))
+
+      (define (release-fork! i)
+        (check-invariants!)
+        (vector-set! forks i (sub1 (vector-ref forks i)))
+        (check-invariants!))
+
+      (define (fork-available? i)
+        (zero? (vector-ref forks i)))
+
+      (define/synchronized (get-forks i j)
+        (let loop ()
+          (cond
+            [(and (fork-available? i) (fork-available? j))
+             (sleep 0)
+             (take-fork! i)
+             (sleep 0)
+             (take-fork! j)
+             ]
+            [else
+             (send this wait)
+             (loop)])))
+
+      (define/public (get-forks/unsafe i j)
+        (let loop ()
+          (cond
+            [(and (fork-available? i) (fork-available? j))
+             (sleep 0)
+             (take-fork! i)
+             (sleep 0)
+             (take-fork! j)
+             ]
+            [else
+             (sleep .1)
+             (loop)])))
+
+      (define/synchronized (release-forks i j)
+        (release-fork! i)
+        (release-fork! j)
+        (send this notify-all))
+
+      (define/public (view)
+        (printf "~v\n" forks))
+
+      (field [invariants-violated? #f])
+      (define (check-invariants!)
+        (for ([f (in-vector forks)])
+          (unless (or (zero? f) (= f 1))
+            (set! invariants-violated? #t))))))
+
+  (define SNOOZE .1)
+  (define DINERS 10)
+  (define HUNGER 5)
+  (define print-thread
+    (thread (lambda ()
+            (let loop ()
+              (define v (thread-receive))
+              (unless (equal? v 'stop)
+                (displayln v)
+                (loop))))))
+  (define (serial-printf . items)
+  (thread-send print-thread
+               (apply format items)))
+  (define (philosopher i table hunger [unsafe? #f])
+    (define left-fork i)
+    (define right-fork (modulo (add1 i) DINERS))
+    (let loop ([hunger hunger])
+      (cond
+        [(zero? hunger)
+         (serial-printf "Philosopher ~v is finished" i)]
+        [else
+         (serial-printf "Philosopher ~v reaches for forks ~v and ~v" i left-fork right-fork)
+         (cond
+           [unsafe? (send table get-forks/unsafe left-fork right-fork)]
+           [else (send table get-forks left-fork right-fork)])
+         (serial-printf "Philosopher ~v obtains forks ~v and ~v" i left-fork right-fork)
+         (sleep SNOOZE)
+         (serial-printf "Philosopher ~v releases forks ~v and ~v" i left-fork right-fork)
+         (send table release-forks left-fork right-fork)
+         (serial-printf "Philosopher ~v dozes off" i)
+         (sleep SNOOZE)
+         (loop (sub1 hunger))])))
+  (define (dining-philosophers-test unsafe?)
+    (define t (new dining-table% [places DINERS]))
+    (define handles
+      (for/list ([i (in-range DINERS)])
+        (thread (thunk (philosopher i t HUNGER unsafe?)))))
+    (for ([thd (in-list handles)])
+      (thread-wait thd))
+    (check-equal? (get-field invariants-violated? t)
+                  unsafe?))
+  (dining-philosophers-test #f)
+  (dining-philosophers-test #t))
