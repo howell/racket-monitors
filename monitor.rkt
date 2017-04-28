@@ -6,26 +6,6 @@
 (module+ test
   (require rackunit))
 
-(define-syntax (define/synchronized stx)
-  (syntax-parse stx
-    [(_ (method-name:id formals:id ...) body:expr ...)
-     #'(define/public (method-name formals ...)
-         (send this enter-synchronized-method)
-         (define result
-           (begin body ...))
-         (send this exit-synchronized-method)
-         result)]))
-
-(define-syntax (define/synchronized/override stx)
-  (syntax-parse stx
-    [(_ (method-name:id formals:id ...) body:expr ...)
-     #'(define/override (method-name formals ...)
-         (send this enter-synchronized-method)
-         (define result
-           (begin body ...))
-         (send this exit-synchronized-method)
-         result)]))
-
 (define monitor-mixin
   (mixin () ()
     (super-new)
@@ -90,6 +70,28 @@
       (enqueue! waiters sema)
       (semaphore-post the-lock)
       (semaphore-wait sema))))
+
+;; how many of these are needed? What should the general form be?
+
+(define-syntax (define/synchronized stx)
+  (syntax-parse stx
+    [(_ (method-name:id formals:id ...) body:expr ...)
+     #'(define/public (method-name formals ...)
+         (send this enter-synchronized-method)
+         (define result
+           (begin body ...))
+         (send this exit-synchronized-method)
+         result)]))
+
+(define-syntax (define/synchronized/override stx)
+  (syntax-parse stx
+    [(_ (method-name:id formals:id ...) body:expr ...)
+     #'(define/override (method-name formals ...)
+         (send this enter-synchronized-method)
+         (define result
+           (begin body ...))
+         (send this exit-synchronized-method)
+         result)]))
 
 (module+ test
 
