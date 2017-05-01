@@ -276,13 +276,16 @@
            (semaphore-post (get-field the-lock this))
            #f]
           [else #t]))
-      (define/synchronized (fail)
-        (error 'fail))
+      ;; recur to test greater stack depths
+      (define/synchronized (fail n)
+        (cond
+          [(zero? n) (error 'fail)]
+          [else (fail (sub1 n))]))
       (define/synchronized (succeed)
         #t)))
   (define et (new exn-test%))
   ;; the exception occurs and propagates
-  (check-exn exn:fail? (thunk (send et fail)))
+  (check-exn exn:fail? (thunk (send et fail 10)))
   ;; but we can still access the monitor
   (define t (thread (thunk (send et succeed))))
   (sleep 0)
