@@ -94,20 +94,26 @@
     [(_ (method-name:id formals:id ...) body:expr ...)
      #'(define/public (method-name formals ...)
          (send this enter-synchronized-method)
-         (define result
-           (let () body ...))
-         (send this exit-synchronized-method)
-         result)]))
+         (with-handlers ([(const #t) (lambda (e)
+                                       (send this exit-synchronized-method)
+                                       (raise e))])
+           (define result
+             (let () body ...))
+           (send this exit-synchronized-method)
+           result))]))
 
 (define-syntax (define/synchronized/override stx)
   (syntax-parse stx
     [(_ (method-name:id formals:id ...) body:expr ...)
      #'(define/override (method-name formals ...)
          (send this enter-synchronized-method)
-         (define result
-           (let () body ...))
-         (send this exit-synchronized-method)
-         result)]))
+         (with-handlers ([(const #t) (lambda (e)
+                                       (send this exit-synchronized-method)
+                                       (raise e))])
+           (define result
+             (let () body ...))
+           (send this exit-synchronized-method)
+           result))]))
 
 (module+ test
 
@@ -153,7 +159,7 @@
                 (get-field count c2)))
 
 (module+ test
-  ;; dining philosophers test case
+  ;; dining philosophers test; uses the wait queue
   (define dining-table%
     (class (monitor-mixin object%)
       (super-new)
@@ -258,3 +264,27 @@
                   unsafe?))
   (dining-philosophers-test #f)
   (dining-philosophers-test #t))
+
+;; test exception handling
+(module+ test
+  (define exn-test%
+    (class (monitor-mixin object%)
+      (super-new)
+      (define (would-block?)
+        (cond
+          [(semaphore-try-wait? (get-field the-lock this))
+           (semaphore-post (get-field the-lock this))
+           #f]
+          [else #t]))
+      (define/synchronized (fail)
+        (error 'fail))
+      (define/synchronized (succeed)
+        #t)))
+  (define et (new exn-test%))
+  ;; the exception occurs and propagates
+  (check-exn exn:fail? (thunk (send et fail)))
+  ;; but we can still access the monitor
+  (define t (thread (thunk (send et succeed))))
+  (sleep 0)
+  (define r (sync/timeout .5 (handle-evt t (const #t))))
+  (check-true r))
