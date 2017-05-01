@@ -92,28 +92,29 @@
 (define-syntax (define/synchronized stx)
   (syntax-parse stx
     [(_ (method-name:id formals:id ...) body:expr ...)
+     (with-syntax ([method-body (synchronized-method-body #'(let () body ...))])
      #'(define/public (method-name formals ...)
-         (send this enter-synchronized-method)
-         (with-handlers ([(const #t) (lambda (e)
-                                       (send this exit-synchronized-method)
-                                       (raise e))])
-           (define result
-             (let () body ...))
-           (send this exit-synchronized-method)
-           result))]))
+         method-body))]))
 
 (define-syntax (define/synchronized/override stx)
   (syntax-parse stx
     [(_ (method-name:id formals:id ...) body:expr ...)
+     (with-syntax ([method-body (synchronized-method-body #'(let () body ...))])
      #'(define/override (method-name formals ...)
-         (send this enter-synchronized-method)
-         (with-handlers ([(const #t) (lambda (e)
-                                       (send this exit-synchronized-method)
-                                       (raise e))])
-           (define result
-             (let () body ...))
-           (send this exit-synchronized-method)
-           result))]))
+         method-body))]))
+
+(begin-for-syntax
+  ;; SyntaxList -> Syntax
+  (define (synchronized-method-body body)
+    #`(let ()
+        (send this enter-synchronized-method)
+        (with-handlers ([(const #t) (lambda (e)
+                                      (send this exit-synchronized-method)
+                                      (raise e))])
+          (define result
+            #,body)
+          (send this exit-synchronized-method)
+          result))))
 
 (module+ test
 
