@@ -1,6 +1,7 @@
 #lang racket
 
 (provide monitor-mixin
+         monitor%
          define/synchronized
          define/synchronized/override)
 
@@ -86,6 +87,10 @@
       (semaphore-wait sema)
       (acquire!)
       (set! stack-depth my-stack-depth))))
+
+;; convenience form for creating monitors that are direct subclasses of object%
+(define monitor%
+  (monitor-mixin object%))
 
 ;; how many of these are needed? What should the general form be?
 
