@@ -1,5 +1,7 @@
 #lang racket
 
+(provide sync-timer%)
+
 (require "../monitor.rkt")
 
 (define sync-timer%
@@ -22,5 +24,4 @@
         (let loop ()
           (sleep period-s)
           (awaken-sleepers)
-          (loop)))))
-    ))
+          (loop)))))))
