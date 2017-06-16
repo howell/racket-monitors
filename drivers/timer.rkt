@@ -13,7 +13,6 @@
     (define period-s (/ period-ms 1000))
     
     (define/synchronized (awaken-sleepers)
-      (printf "beep\n")
       (notify-all))
     
     (define/synchronized (wait-for-tick)
