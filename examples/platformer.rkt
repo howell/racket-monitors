@@ -274,7 +274,7 @@
         (cons (game-state player-old env-old cur-goal enemies-new lsize)
               col?)])]
     [else
-     gs]))
+     (cons gs #f)]))
 
 ;; GameState Id Rect EnemyController -> GameState
 (define (add-enemy gs id r controller)
