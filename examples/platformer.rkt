@@ -438,6 +438,7 @@
                 keyboard-driver ;; KeyboardDriver
                 )
     (define current-level (first levels))
+    (set! levels (rest levels))
 
     ;; Level GameLogic -> Void
     (define (load-level! lvl game-logic)
