@@ -46,34 +46,7 @@
 ;; Game Logic
 
 ;; Entities send the game logic movement requests. Requests carry the Id of the
-;; entity involved as well as a channel along which the game logic sends back a
-;; response.
-;; A MoveRequest is one of:
-;;   (move-x Id Integer (Channelof MoveResponse))
-;;   (move-y Id Integer (Channelof MoveResponse))
-;;   (player-can-jump? (Channelof MoveResponse))
-(struct move-x (id dx resp-chan) #:transparent)
-(struct move-y (id dy resp-chan) #:transparent)
-(struct player-can-jump? (resp-chan) #:transparent)
-
-;; a MoveResponse is one of
-;;  'ok
-;;  (y-collision)
-;;  (can-jump)
-;;  (cannot-jump)
-(struct y-collision () #:transparent)
-(struct can-jump () #:transparent)
-(struct cannot-jump () #:transparent)
-
-;; a GameEvent is one of
-;;   'level-complete for when the player reaches the goal
-;;   'defeat for when the player dies
-;;   (death) for the death of an entity
-(struct death () #:transparent)
-
-;; Pieces of the environment come into being by sending (make-env Rect) to the
-;; game-logic process
-(struct make-env (r) #:transparent)
+;; entity involved.
 
 ;; an Enemy is (enemy Id Rect EnemyController), representing the identity,
 ;; a channel the game logic will use to notify the enemy of relevant events,
@@ -489,43 +462,10 @@
             (set! levels rest-levels)
             (start-current)])]
         ['defeat
+         (printf "restarting\n")
          (start-current)]))
 
     (start-current)))
-
-;; (NonemptyListof Level) GameClock Render KeyboardDriver -> LevelManager
-#;(define (spawn-level-manager levels game-clock renderer keyboard-driver)
-  (spawn
-   (let loop ([levels levels])
-     (match-define (cons level1 next-levels) levels)
-     (let run-current ()
-       (define game-logic
-         (spawn-game-logic game-clock
-                           renderer
-                           (level-player0 level1)
-                           (level-goal level1)
-                           (level-size level1)))
-       (define player
-         (spawn-player-avatar keyboard-driver game-logic game-clock))
-       (monitor game-logic)
-       (load-level! level1 game-logic game-clock)
-       (receive
-        [(down (== game-logic) 'defeat)
-         (run-current)]
-        [(down (== game-logic) 'level-complete)
-         (cond
-           [(empty? next-levels)
-            (send! renderer (render-victory))]
-           [else
-            (loop next-levels)])])))))
-
-;; Level PID PID -> Void
-#;(define (load-level! lvl game-logic game-clock)
-  (match-define (level _ env _ mk-es _) lvl)
-  (for ([r (in-list env)])
-    (send! game-logic (make-env r)))
-  (mk-es game-logic game-clock))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Enemies
