@@ -79,13 +79,18 @@
     ;; GameState
     (define gs (game-state player0 '() goal0 (hash) level-size))
 
+    (define/synchronized (read-gs)
+      gs)
+
     (define worker-thread
       (thread
        (thunk
         (let loop ()
-          (send game-clock wait-for-tick)
-          (send renderer render-gamestate gs)
-          (loop)))))
+          (let ([gs (send this read-gs)])
+            (when gs
+              (send game-clock wait-for-tick)
+              (send renderer render-gamestate gs)
+              (loop)))))))
 
     ;; Listof LevelOverObserver
     (define level-over-observers '())
@@ -99,11 +104,11 @@
       (set! level-over-observers (remove observer level-over-observers)))
 
     ;; LevelOver -> Void
-    (define (level-over! reason)
-      (kill-thread worker-thread)
+    (define/synchronized (level-over! reason)
+      (set! gs #f)
       (for ([obs (in-list level-over-observers)])
         (send obs level-over reason))
-      (set! gs #f))
+      )
 
     ;; ID Number -> Void
     (define/synchronized (move-x id dx)
@@ -305,6 +310,7 @@
     (define/synchronized (update-vy new-vy)
       (set! vy new-vy))
 
+    (define continue? #t)
     (define worker-thread
       (thread
        (thunk
@@ -320,7 +326,8 @@
                 0
                 (min (+ vy gravity) EFFECTIVE-TERMINAL-VELOCITY)))
           (send this update-vy vy-new)
-          (loop)))))
+          (when continue?
+            (loop))))))
 
     ;; KeyEvent -> Void
     (define/synchronized (on-key ke)
@@ -340,7 +347,7 @@
 
     ;; LevelOver -> Void
     (define/synchronized (level-over reason)
-      (kill-thread worker-thread)
+      (set! continue? #f)
       (send keyboard-driver unsubscribe)
       (send game-logic unsubscribe))))
 
@@ -484,7 +491,7 @@
   (make-weak-hash))
 
 (define enemy%
-  (class* object% (enemy-controller<%>
+  (class* monitor% (enemy-controller<%>
                    level-over-observer<%>)
     (super-new)
 
@@ -500,6 +507,7 @@
 
     (define id (gensym 'enemy))
 
+    (define continue? #t)
     (define worker-thread
       (thread
        (thunk
@@ -509,15 +517,16 @@
         (let loop ([n 0])
           (send game-clock wait-for-tick)
           (behavior n id)
-          (loop (add1 n))))))
+          (when continue?
+            (loop (add1 n)))))))
     
     ;; -> Void
-    (define/public (death)
-      (kill-thread worker-thread))
+    (define/synchronized (death)
+      (set! continue? #f))
 
     ;; LevelOver -> Void
     (define/public (level-over reason)
-      (kill-thread worker-thread))
+      (death))
 
     ;; Natural ID -> Void
     (define/public (behavior n id)
@@ -593,19 +602,23 @@
 ;; a Renderer is an instance of renderer%
 
 (define renderer%
-  (class object%
+  (class monitor%
     (super-new)
     ;; dc<%>
     (init-field dc ;; dc<%>
                 )
 
+    (define game-over? #f)
+
     ;; -> Void
-    (define/public (render-victory)
+    (define/synchronized (render-victory)
+      (set! game-over? #t)
       (draw-victory dc))
 
     ;; GameState -> Void
-    (define/public (render-gamestate gs)
-      (draw-game-state dc gs))))
+    (define/synchronized (render-gamestate gs)
+      (unless game-over?
+        (draw-game-state dc gs)))))
 
 (define (draw-victory dc)
   (big-text dc "Victory!" "green"))
