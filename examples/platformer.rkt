@@ -102,56 +102,65 @@
     (define (level-over! reason)
       (kill-thread worker-thread)
       (for ([obs (in-list level-over-observers)])
-        (send obs level-over reason)))
+        (send obs level-over reason))
+      (set! gs #f))
 
-    ;; ID Number -> Boolean
+    ;; ID Number -> Void
     (define/synchronized (move-x id dx)
-      (define answer
-        (match id
-          [(== player-id)
-           (player-motion-x gs dx)]
-          [else
-           (enemy-motion-x gs id dx)]))
-      (match answer
-        [(? game-state? next-gs)
-         (set! gs next-gs)]
-        [done
-         (level-over! done)]))
+      (when gs
+        (define answer
+          (match id
+            [(== player-id)
+             (player-motion-x gs dx)]
+            [else
+             (enemy-motion-x gs id dx)]))
+        (match answer
+          [(? game-state? next-gs)
+           (set! gs next-gs)]
+          [done
+           (level-over! done)])))
 
     ;; ID Number -> Boolean
     ;; returns whether a y collision occurred
     (define/synchronized (move-y id dy)
-      (define answer
-        (match id
-          [(== player-id)
-           (player-motion-y gs dy)]
-          [else
-           (enemy-motion-y gs id dy)]))
-      (match answer
-        [(cons (? game-state? next-gs) collision?)
-         (set! gs next-gs)
-         collision?]
-        [done
-         (level-over! done)
-         #f]))
+      (and gs
+        (let ()
+          (define answer
+            (match id
+              [(== player-id)
+               (player-motion-y gs dy)]
+              [else
+               (enemy-motion-y gs id dy)]))
+          (match answer
+            [(cons (? game-state? next-gs) collision?)
+             (set! gs next-gs)
+             collision?]
+            [done
+             (level-over! done)
+             #f]))))
 
     ;; -> Boolean
     (define/synchronized (player-can-jump?)
-      (define on-top-of-something?
-         (cdr (move-player-y (game-state-player gs)
-                             1
-                             (game-state-env gs))))
-       on-top-of-something?)
+      (and gs
+           (let ()
+             (define on-top-of-something?
+               (cdr (move-player-y (game-state-player gs)
+                                   1
+                                   (game-state-env gs))))
+             on-top-of-something?)))
 
     ;; ID Rect -> Void
     (define/synchronized (make-enemy id r controller)
-      (set! gs (add-enemy gs id r controller)))
+      (and gs
+           (set! gs (add-enemy gs id r controller))))
 
     ;; Rect -> Void
     (define/synchronized (make-env r)
-      (define new-env (cons r (game-state-env gs)))
-      (define next-state (struct-copy game-state gs [env new-env]))
-      (set! gs next-state))))
+      (and gs
+           (let ()
+             (define new-env (cons r (game-state-env gs)))
+             (define next-state (struct-copy game-state gs [env new-env]))
+             (set! gs next-state))))))
 
 
 ;; GameState Number -> (U GameState LevelOver)
